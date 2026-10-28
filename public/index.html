@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Garabatos · dibuja y adivina</title>
+  <meta name="description" content="Juego multijugador de dibujar y adivinar con amigos. Sin registros: crea una sala y comparte el enlace.">
+  <meta name="theme-color" content="#7c5cff">
+  <meta property="og:title" content="Garabatos 🎨 ¡Dibuja y adivina!">
+  <meta property="og:description" content="Te han invitado a una partida. Entra, pon tu nombre y a jugar.">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🖍️</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- PORTADA -->
+  <main id="portada" class="pantalla activa">
+    <div class="tarjeta portada">
+      <h1 class="logo"><span>G</span><span>a</span><span>r</span><span>a</span><span>b</span><span>a</span><span>t</span><span>o</span><span>s</span></h1>
+      <p class="lema">Dibuja, adivina y ríete con tus amigos</p>
+
+      <p id="invitacion" class="invitacion oculto">Te han invitado a la sala <b id="invitacionCodigo"></b></p>
+
+      <label class="campo">
+        <span>Tu nombre</span>
+        <input id="nombre" maxlength="16" autocomplete="nickname" placeholder="Ej.: Lucía">
+      </label>
+
+      <div class="campo">
+        <span>Tu color</span>
+        <div id="coloresJugador" class="colores-jugador"></div>
+      </div>
+
+      <div id="bloqueUnirse" class="unirse">
+        <input id="codigo" maxlength="5" placeholder="Código" autocapitalize="off" autocomplete="off" spellcheck="false">
+        <button id="btnUnirse" class="btn secundario">Unirse</button>
+      </div>
+      <div class="separador"><span>o</span></div>
+      <button id="btnCrear" class="btn principal grande">Crear sala nueva</button>
+
+      <p class="ayuda">De 2 a 8 jugadores · Sin registros · Funciona en el móvil</p>
+    </div>
+  </main>
+
+  <!-- SALA DE ESPERA -->
+  <main id="espera" class="pantalla">
+    <div class="tarjeta espera">
+      <p class="etiqueta">Código de la sala</p>
+      <div id="codigoSala" class="codigo-grande"></div>
+      <button id="btnCompartir" class="btn secundario">📤 Compartir enlace</button>
+
+      <h2>Jugadores <span id="contadorJugadores" class="contador"></span></h2>
+      <ul id="listaEspera" class="lista-espera"></ul>
+
+      <button id="btnEmpezar" class="btn principal grande">¡Empezar!</button>
+      <p id="textoEspera" class="ayuda"></p>
+      <button class="btn texto btnSalir">Salir de la sala</button>
+    </div>
+  </main>
+
+  <!-- PARTIDA -->
+  <main id="partida" class="pantalla">
+    <header class="barra">
+      <div class="reloj" id="reloj"><svg viewBox="0 0 36 36"><circle cx="18" cy="18" r="16" class="fondo-reloj"/><circle cx="18" cy="18" r="16" id="arcoReloj" class="arco-reloj"/></svg><span id="segundos">80</span></div>
+      <div class="centro-barra">
+        <div id="pista" class="pista"></div>
+        <div id="subPista" class="sub-pista"></div>
+      </div>
+      <div class="vuelta" id="vuelta">1/3</div>
+    </header>
+
+    <section class="zona-lienzo">
+      <div class="marco" id="marco">
+        <canvas id="lienzo" width="800" height="600"></canvas>
+        <div id="capa" class="capa oculto"></div>
+      </div>
+      <div id="herramientas" class="herramientas oculto">
+        <div id="paleta" class="paleta"></div>
+        <div class="grupo">
+          <div id="grosores" class="grosores"></div>
+          <button id="btnGoma" class="herr" title="Goma" aria-label="Goma">🧽</button>
+          <button id="btnDeshacer" class="herr" title="Deshacer" aria-label="Deshacer">↩️</button>
+          <button id="btnBorrar" class="herr" title="Borrar todo" aria-label="Borrar todo">🗑️</button>
+        </div>
+      </div>
+    </section>
+
+    <aside class="zona-jugadores">
+      <ul id="marcador" class="marcador"></ul>
+    </aside>
+
+    <section class="zona-chat">
+      <ul id="chat" class="chat"></ul>
+      <form id="formChat" class="form-chat" autocomplete="off">
+        <input id="entradaChat" maxlength="100" placeholder="Escribe tu respuesta…" enterkeyhint="send">
+        <button class="btn principal" aria-label="Enviar">➤</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- FINAL -->
+  <main id="final" class="pantalla">
+    <div class="tarjeta final">
+      <div class="confeti">🎉</div>
+      <h2 id="ganador"></h2>
+      <ol id="podio" class="podio"></ol>
+      <button id="btnOtraVez" class="btn principal grande">Jugar otra vez</button>
+      <p id="textoFinal" class="ayuda"></p>
+      <button class="btn texto btnSalir">Salir de la sala</button>
+    </div>
+  </main>
+
+  <div id="aviso" class="aviso oculto"></div>
+  <div id="sinConexion" class="sin-conexion oculto">Reconectando…</div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>
