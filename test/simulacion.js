@@ -1,12 +1,12 @@
-// Simula varios jugadores conectados a la vez y recorre una partida completa.
+// Simula varios jugadores conectados a la vez y recorre una partida completa
+// contra el servidor de Cloudflare ejecutado en local (wrangler dev).
 // Uso: npm test
 const { spawn } = require('child_process');
 const path = require('path');
-const { io } = require('socket.io-client');
-const normalizar = (t) => t.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
 
-const PUERTO = 3999;
+const PUERTO = 8799;
 const URL = `http://localhost:${PUERTO}`;
+const normalizar = (t) => t.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 let fallos = 0;
 
 function ok(condicion, texto) {
@@ -15,18 +15,31 @@ function ok(condicion, texto) {
 }
 
 function jugador() {
-  const s = io(URL, { forceNew: true, transports: ['websocket'] });
-  s.estado = null;
-  s.chats = [];
-  s.trazos = [];
-  s.on('estado', (e) => (s.estado = e));
-  s.on('chat', (m) => s.chats.push(m));
-  s.on('trazo:inicio', (t) => s.trazos.push(t));
-  s.on('trazo:puntos', (p) => s.trazos.push(p));
+  const s = { estado: null, chats: [], trazos: [], esperando: new Map(), siguienteId: 1, cerradoCon: null };
+  s.conectar = (codigo) =>
+    new Promise((res, rej) => {
+      s.ws = new WebSocket(`ws://localhost:${PUERTO}/ws/${codigo}`);
+      s.ws.onopen = () => res();
+      s.ws.onerror = () => rej(new Error('No se pudo conectar'));
+      s.ws.onclose = (e) => (s.cerradoCon = e.code);
+      s.ws.onmessage = (e) => {
+        const m = JSON.parse(e.data);
+        if (m.t === 'respuesta') { s.esperando.get(m.id)(m.d); s.esperando.delete(m.id); }
+        else if (m.t === 'estado') s.estado = m.d;
+        else if (m.t === 'chat') s.chats.push(m.d);
+        else if (m.t === 'trazo:inicio' || m.t === 'trazo:puntos') s.trazos.push(m.d);
+      };
+    });
+  s.emit = (t, d) => s.ws.send(JSON.stringify({ t, d }));
+  s.pedir = (t, d) => new Promise((res) => {
+    const id = s.siguienteId++;
+    s.esperando.set(id, res);
+    s.ws.send(JSON.stringify({ t, d, id }));
+  });
+  s.entrar = async (codigo, datos) => { await s.conectar(codigo); return s.pedir('sala:entrar', datos); };
+  s.desconectar = () => s.ws.close();
   return s;
 }
-
-const pedir = (s, evento, datos) => new Promise((res) => s.emit(evento, datos, res));
 
 function esperar(s, condicion, ms = 15000) {
   return new Promise((res, rej) => {
@@ -39,13 +52,22 @@ function esperar(s, condicion, ms = 15000) {
 }
 const pausa = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function main() {
-  const servidor = spawn(process.execPath, [path.join(__dirname, '..', 'server.js')], {
-    env: { ...process.env, PORT: PUERTO, DRAW_TIME: 3, CHOOSE_TIME: 1, TURNEND_TIME: 1, GRACE_TIME: 2 },
-    stdio: 'inherit',
+async function arrancarServidor() {
+  const vars = ['DRAW_TIME:3', 'CHOOSE_TIME:1', 'TURNEND_TIME:1', 'GRACE_TIME:2'].flatMap((v) => ['--var', v]);
+  const servidor = spawn(path.join(__dirname, '..', 'node_modules', '.bin', 'wrangler'), ['dev', '--port', String(PUERTO), '--persist-to', path.join(require('os').tmpdir(), 'garabatos-test-' + Date.now()), ...vars], {
+    cwd: path.join(__dirname, '..'),
+    stdio: ['ignore', 'pipe', 'pipe'],
   });
-  await pausa(800);
+  servidor.stderr.on('data', (d) => process.env.DEBUG && process.stderr.write(d));
+  for (let i = 0; i < 100; i++) {
+    await pausa(300);
+    try { if ((await fetch(URL)).ok) return servidor; } catch { /* aún arrancando */ }
+  }
+  throw new Error('El servidor local no arrancó');
+}
 
+async function main() {
+  const servidor = await arrancarServidor();
   try {
     const pagina = await fetch(`${URL}/sala/abcde`);
     ok(pagina.ok && (await pagina.text()).includes('Garabatos'), 'La URL /sala/abcde sirve la web');
@@ -54,17 +76,20 @@ async function main() {
     const beto = jugador();
     const carla = jugador();
 
-    const r1 = await pedir(ana, 'sala:crear', { nombre: 'Ana', color: '#ff6b6b' });
-    ok(/^[a-z]{5}$/.test(r1.codigo), `Sala creada con código de 5 letras: ${r1.codigo}`);
-    const codigo = r1.codigo;
+    const { codigo } = await (await fetch(`${URL}/api/crear`, { method: 'POST' })).json();
+    ok(/^[a-z]{5}$/.test(codigo), `Sala creada con código de 5 letras: ${codigo}`);
+    const r1 = await ana.entrar(codigo, { nombre: 'Ana', color: '#ff6b6b' });
+    ok(r1.ok, 'Ana entra en su sala');
 
-    const mal = await pedir(beto, 'sala:entrar', { nombre: 'Beto', codigo: 'zzzzz' });
+    const fantasma = jugador();
+    const mal = await fantasma.entrar('zzzzz', { nombre: 'Beto' });
     ok(Boolean(mal.error), 'Código inexistente da error');
-    const rB = await pedir(beto, 'sala:entrar', { nombre: 'Beto', codigo: codigo.toUpperCase() });
-    ok(rB.ok, 'Beto entra (código en mayúsculas)');
-    const repetido = await pedir(carla, 'sala:entrar', { nombre: 'ana', codigo });
+
+    const rB = await beto.entrar(codigo, { nombre: 'Beto' });
+    ok(rB.ok, 'Beto entra');
+    const repetido = await carla.entrar(codigo, { nombre: 'ana' });
     ok(Boolean(repetido.error), 'No se permite repetir nombre');
-    const rC = await pedir(carla, 'sala:entrar', { nombre: 'Carla', codigo, color: '#2e86de' });
+    const rC = await carla.pedir('sala:entrar', { nombre: 'Carla', color: '#2e86de' });
     ok(rC.ok, 'Carla entra');
 
     await esperar(ana, (e) => e.jugadores.length === 3);
@@ -123,21 +148,28 @@ async function main() {
     // Recarga de página de g2: se desconecta y vuelve con su identificador
     const idG2 = g2.estado.tuId;
     const nombreG2 = g2.estado.jugadores.find((j) => j.id === idG2).nombre;
-    g2.disconnect();
+    g2.desconectar();
     await pausa(300);
     const g2b = jugador();
-    const vuelta = await pedir(g2b, 'sala:entrar', { nombre: nombreG2, codigo, jugadorId: idG2 });
+    const vuelta = await g2b.entrar(codigo, { nombre: nombreG2, jugadorId: idG2 });
     ok(vuelta.ok && vuelta.jugadorId === idG2, 'Tras recargar vuelve como el mismo jugador');
     await esperar(g2b, (e) => e.fase === 'dibujando');
     ok(g2b.estado.palabra === null, 'Al volver sigue sin ver la palabra');
 
-    g2b.emit('chat', palabra);
+    // Si vuelve a entrar sin haberse cerrado la conexión anterior, la vieja se sustituye
+    const g2c = jugador();
+    const doble = await g2c.entrar(codigo, { nombre: nombreG2, jugadorId: idG2 });
+    await pausa(200);
+    ok(doble.ok && g2b.cerradoCon === 4000, 'Una conexión colgada se sustituye por la nueva');
+
+    g2c.emit('chat', palabra);
     const finTurno = await esperar(dibujante, (e) => e.fase === 'finTurno');
     ok(finTurno.motivoFin === 'todos', 'El turno termina cuando todos aciertan');
-    ok(g2b.estado.palabra === palabra, 'Al acabar el turno todos ven la palabra');
+    await esperar(g2c, (e) => e.fase === 'finTurno');
+    ok(g2c.estado.palabra === palabra, 'Al acabar el turno todos ven la palabra');
 
     // Pistas: en el siguiente turno, si nadie acierta, se revelan letras
-    const otros = [ana, beto, g2b];
+    const otros = [ana, beto, g2c];
     await esperar(ana, (e) => e.fase === 'dibujando', 5000);
     await pausa(2700);
     const adivino = otros.find((s) => s.estado.dibujanteId !== s.estado.tuId);
@@ -158,11 +190,11 @@ async function main() {
     // Si se queda un único jugador conectado, la partida termina sola
     ana.emit('partida:empezar');
     await esperar(ana, (e) => e.fase === 'eligiendo');
-    beto.disconnect();
-    g2b.disconnect();
+    beto.desconectar();
+    g2c.desconectar();
     const solo = await esperar(ana, (e) => e.fase === 'final', 6000);
     ok(solo.fase === 'final', 'Con un solo jugador conectado la partida acaba');
-    ana.disconnect();
+    ana.desconectar();
   } catch (e) {
     ok(false, 'Error inesperado: ' + e.message);
   } finally {

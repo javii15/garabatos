@@ -80,4 +80,4 @@ for (const bruta of LISTA.split(',')) {
   PALABRAS.push(palabra);
 }
 
-module.exports = PALABRAS;
+export default PALABRAS;

@@ -17,7 +17,87 @@
     guardar(tipo, clave, valor) { try { window[tipo].setItem(clave, valor); } catch { /* sin almacenamiento */ } },
   };
 
-  const socket = io();
+  // ---------- conexión en tiempo real (WebSocket con reconexión automática) ----------
+  const socket = (() => {
+    const manejadores = {};
+    const esperando = new Map();
+    let ws = null;
+    let siguienteId = 1;
+    let reintentos = 0;
+    let temporizadorReconexion;
+    let alAbrir = null;
+    let codigoWs = null;
+
+    function conectar(codigo, cuandoAbra) {
+      cerrar();
+      codigoWs = codigo;
+      alAbrir = cuandoAbra;
+      const este = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${codigo}`);
+      ws = este;
+      este.onopen = () => {
+        reintentos = 0;
+        $('#sinConexion').classList.add('oculto');
+        alAbrir();
+      };
+      este.onmessage = (e) => {
+        let m;
+        try { m = JSON.parse(e.data); } catch { return; }
+        if (m.t === 'respuesta') {
+          const cb = esperando.get(m.id);
+          esperando.delete(m.id);
+          if (cb) cb(m.d);
+        } else if (manejadores[m.t]) {
+          manejadores[m.t](m.d);
+        }
+      };
+      este.onclose = (e) => {
+        if (ws !== este) return;
+        ws = null;
+        if (e.code === 4004) return;
+        if (e.code === 4000) {
+          aviso('Has abierto esta sala en otra pestaña');
+          return;
+        }
+        if (!salaActual) return;
+        $('#sinConexion').classList.remove('oculto');
+        clearTimeout(temporizadorReconexion);
+        temporizadorReconexion = setTimeout(() => conectar(codigoWs, alAbrir), Math.min(5000, 400 * 2 ** reintentos++));
+      };
+    }
+
+    function cerrar() {
+      clearTimeout(temporizadorReconexion);
+      if (ws) {
+        const viejo = ws;
+        ws = null;
+        try { viejo.close(); } catch { /* ya cerrado */ }
+      }
+    }
+
+    function emit(t, d, cb) {
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        if (cb) cb({ error: 'Sin conexión, reintentando…' });
+        return;
+      }
+      const m = { t, d };
+      if (cb) {
+        m.id = siguienteId++;
+        esperando.set(m.id, cb);
+      }
+      ws.send(JSON.stringify(m));
+    }
+
+    // Mantiene viva la conexión y reconecta al volver a la pestaña (móviles)
+    setInterval(() => { if (ws && ws.readyState === WebSocket.OPEN) ws.send('{"t":"ping"}'); }, 25000);
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible' && salaActual && !ws) {
+        reintentos = 0;
+        conectar(codigoWs, alAbrir);
+      }
+    });
+
+    return { conectar, cerrar, emit, on: (t, fn) => (manejadores[t] = fn) };
+  })();
   let estado = null;
   let salaActual = null; // { codigo, nombre, color }
   let recibidoEn = 0;
@@ -78,6 +158,8 @@
   function alEntrar(respuesta, datos) {
     if (respuesta.error) {
       aviso(respuesta.error);
+      salaActual = null;
+      socket.cerrar();
       if (location.pathname !== '/') history.replaceState(null, '', '/');
       mostrar('portada');
       return;
@@ -89,12 +171,21 @@
 
   function unirse(codigo, datos) {
     const jugadorId = almacen.leer('sessionStorage', 'garabatos:id:' + codigo);
-    socket.emit('sala:entrar', { ...datos, codigo, jugadorId }, (r) => alEntrar(r, datos));
+    socket.conectar(codigo, () => {
+      const id = almacen.leer('sessionStorage', 'garabatos:id:' + codigo) || jugadorId;
+      socket.emit('sala:entrar', { ...datos, jugadorId: id }, (r) => alEntrar(r, datos));
+    });
   }
 
   $('#btnCrear').onclick = () => {
     const datos = datosJugador();
-    if (datos) socket.emit('sala:crear', datos, (r) => alEntrar(r, datos));
+    if (!datos) return;
+    $('#btnCrear').disabled = true;
+    fetch('/api/crear', { method: 'POST' })
+      .then((r) => r.json())
+      .then((r) => (r.codigo ? unirse(r.codigo, datos) : aviso(r.error)))
+      .catch(() => aviso('No se pudo crear la sala. ¿Tienes conexión?'))
+      .finally(() => ($('#btnCrear').disabled = false));
   };
   $('#btnUnirse').onclick = () => {
     const datos = datosJugador();
@@ -114,6 +205,7 @@
   document.querySelectorAll('.btnSalir').forEach((b) => (b.onclick = () => {
     socket.emit('sala:salir');
     salaActual = null;
+    socket.cerrar();
     estado = null;
     history.replaceState(null, '', '/');
     $('#invitacion').classList.add('oculto');
@@ -122,13 +214,6 @@
     $('#chat').replaceChildren();
     mostrar('portada');
   }));
-
-  // ---------- conexión ----------
-  socket.on('connect', () => {
-    $('#sinConexion').classList.add('oculto');
-    if (salaActual) unirse(salaActual.codigo, salaActual);
-  });
-  socket.on('disconnect', () => { if (salaActual) $('#sinConexion').classList.remove('oculto'); });
 
   // ---------- sala de espera ----------
   function enlaceSala() { return location.origin + '/sala/' + estado.codigo; }

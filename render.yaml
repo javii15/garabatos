@@ -1,8 +1,0 @@
-services:
-  - type: web
-    name: garabatos
-    runtime: node
-    plan: free
-    buildCommand: npm install --omit=dev
-    startCommand: npm start
-    healthCheckPath: /healthz

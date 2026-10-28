@@ -2,20 +2,17 @@
   "name": "garabatos",
   "version": "1.0.0",
   "description": "Juego multijugador de dibujar y adivinar, en español",
-  "main": "server.js",
+  "main": "src/index.js",
   "private": true,
   "scripts": {
-    "start": "node server.js",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
     "test": "node test/simulacion.js"
   },
   "engines": {
-    "node": ">=18"
-  },
-  "dependencies": {
-    "express": "^4.21.2",
-    "socket.io": "^4.8.1"
+    "node": ">=20"
   },
   "devDependencies": {
-    "socket.io-client": "^4.8.1"
+    "wrangler": "^4.154.0"
   }
 }
